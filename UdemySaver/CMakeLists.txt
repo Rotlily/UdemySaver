@@ -33,8 +33,8 @@ find_package(CURL REQUIRED)
 target_link_libraries(UdemySaver PRIVATE CURL::libcurl)
 
 # boost-beast
-find_package(Boost REQUIRED COMPONENTS system thread)
-target_link_libraries(UdemySaver PRIVATE Boost::system Boost::thread)
+find_package(Boost REQUIRED)
+target_link_libraries(UdemySaver PRIVATE Boost::boost)
 
 # nlohmann_json
 find_package(nlohmann_json CONFIG REQUIRED)

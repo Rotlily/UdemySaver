@@ -1,7 +1,9 @@
 ﻿#include "RequestHandler.h"
 
+#ifdef _WIN32
 #define NOMINMAX
 #include <Windows.h>
+#endif
 
 #include <nlohmann/json.hpp>
 #include <boost/beast/http/status.hpp>
@@ -98,9 +100,14 @@ bool RequestHandler::probe_content_length(const std::string& url,
 	curl_easy_setopt(ch.h, CURLOPT_HEADERDATA, &hp);
 	curl_easy_setopt(ch.h, CURLOPT_CONNECTTIMEOUT_MS, 8000L);
 	curl_easy_setopt(ch.h, CURLOPT_TIMEOUT_MS, 20000L);
-	curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYPEER, 1L);
-	curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYHOST, 2L);
-	if (!proxy_.empty()) curl_easy_setopt(ch.h, CURLOPT_PROXY, proxy_.c_str());
+	if (!proxy_.empty()) {
+		curl_easy_setopt(ch.h, CURLOPT_PROXY, proxy_.c_str());
+		curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYPEER, 0L);
+		curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYHOST, 0L);
+	} else {
+		curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYPEER, 1L);
+		curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYHOST, 2L);
+	}
 
 	CURLcode rc = curl_easy_perform(ch.h);
 
@@ -325,6 +332,7 @@ void RequestHandler::load_settings() {
 		{
 			f << "# UdemySaver settings\n";
 			f << "udemy_access_token=\n";
+			f << "udemy_client_id=\n";
 			f << "udemy_api_base=https://www.udemy.com\n";
 			f << "# http_proxy=\n";
 			f << "download_subtitles=true\n";
@@ -332,6 +340,7 @@ void RequestHandler::load_settings() {
 		}
 
 		token_.clear();
+		client_id_.clear();
 		api_base_ = "https://www.udemy.com";
 		proxy_.clear();
 		download_subtitles_ = true;
@@ -360,6 +369,9 @@ void RequestHandler::load_settings() {
 
 	if (kv.count("udemy_access_token")) token_ = kv["udemy_access_token"];
 	else if (kv.count("access_token"))  token_ = kv["access_token"];
+
+	if (kv.count("udemy_client_id")) client_id_ = kv["udemy_client_id"];
+	else if (kv.count("client_id"))  client_id_ = kv["client_id"];
 
 	if (kv.count("udemy_api_base")) api_base_ = kv["udemy_api_base"];
 	else if (kv.count("api_base"))   api_base_ = kv["api_base"];
@@ -403,20 +415,41 @@ std::string RequestHandler::udemy_get(const std::string& url, long timeout_ms) {
 	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 8000L);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Helper::write_to_string);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-
+	// When using a proxy (like mitmproxy), disable SSL verification
+	// since the proxy will intercept and re-sign certificates
 	if (!proxy_.empty())
 	{
 		curl_easy_setopt(curl, CURLOPT_PROXY, proxy_.c_str());
+		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+	}
+	else
+	{
+		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
 	}
 
 	// headers
 	std::string auth = "Authorization: Bearer " + token_;
+	std::string udemy_auth = "X-Udemy-Authorization: Bearer " + token_;
+	std::string cookie_header = "Cookie: access_token=" + token_;
+	if (!client_id_.empty()) {
+		cookie_header += "; client_id=" + client_id_;
+	}
 	hdr.list = curl_slist_append(hdr.list, auth.c_str());
+	hdr.list = curl_slist_append(hdr.list, udemy_auth.c_str());
 	hdr.list = curl_slist_append(hdr.list, "Accept: application/json, text/plain, */*");
+	hdr.list = curl_slist_append(hdr.list, cookie_header.c_str());
 	hdr.list = curl_slist_append(hdr.list, "Referer: https://www.udemy.com/");
 	hdr.list = curl_slist_append(hdr.list, "Origin: https://www.udemy.com");
+	// Add browser fingerprint headers to bypass Cloudflare
+	hdr.list = curl_slist_append(hdr.list, "sec-ch-ua: \"Chromium\";v=\"122\", \"Not(A:Brand\";v=\"24\", \"Google Chrome\";v=\"122\"");
+	hdr.list = curl_slist_append(hdr.list, "sec-ch-ua-mobile: ?0");
+	hdr.list = curl_slist_append(hdr.list, "sec-ch-ua-platform: \"macOS\"");
+	hdr.list = curl_slist_append(hdr.list, "sec-fetch-dest: empty");
+	hdr.list = curl_slist_append(hdr.list, "sec-fetch-mode: cors");
+	hdr.list = curl_slist_append(hdr.list, "sec-fetch-site: same-origin");
+
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdr.list);
 
 	CURLcode rc = curl_easy_perform(curl);
@@ -1261,11 +1294,15 @@ bool RequestHandler::curl_download_file(const std::string& url, const std::strin
 
 	curl_easy_setopt(ch.h, CURLOPT_CONNECTTIMEOUT_MS, 8000L);
 	curl_easy_setopt(ch.h, CURLOPT_TIMEOUT, 0L); // sınırsız
-	curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYPEER, 1L);
-	curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYHOST, 2L);
 
-	if (!proxy_.empty())
+	if (!proxy_.empty()) {
 		curl_easy_setopt(ch.h, CURLOPT_PROXY, proxy_.c_str());
+		curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYPEER, 0L);
+		curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYHOST, 0L);
+	} else {
+		curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYPEER, 1L);
+		curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYHOST, 2L);
+	}
 
 	// resume
 	if (already > 0)
@@ -1390,9 +1427,14 @@ std::string RequestHandler::resolve_lecture_stream(int course_id, int lecture_id
 				curl_easy_setopt(ch.h, CURLOPT_WRITEDATA, &out);
 				curl_easy_setopt(ch.h, CURLOPT_CONNECTTIMEOUT_MS, 8000L);
 				curl_easy_setopt(ch.h, CURLOPT_TIMEOUT_MS, 20000L);
-				curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYPEER, 1L);
-				curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYHOST, 2L);
-				if (!proxy_.empty()) curl_easy_setopt(ch.h, CURLOPT_PROXY, proxy_.c_str());
+				if (!proxy_.empty()) {
+					curl_easy_setopt(ch.h, CURLOPT_PROXY, proxy_.c_str());
+					curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYPEER, 0L);
+					curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYHOST, 0L);
+				} else {
+					curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYPEER, 1L);
+					curl_easy_setopt(ch.h, CURLOPT_SSL_VERIFYHOST, 2L);
+				}
 
 				CURLcode rc = curl_easy_perform(ch.h);
 				if (hdr) curl_slist_free_all(hdr);

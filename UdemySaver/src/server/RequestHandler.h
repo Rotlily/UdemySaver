@@ -5,6 +5,7 @@
 #include <vector>
 #include <boost/beast/http/status.hpp>
 #include <mutex>
+#include <thread>
 #include <functional>
 #include <unordered_map>
 #include <nlohmann/json.hpp>
@@ -116,6 +117,7 @@ private:
 private:
 	std::string webroot_;
 	std::string token_;     // settings: udemy_access_token / access_token
+	std::string client_id_; // settings: udemy_client_id (for Cloudflare bypass)
 	std::string api_base_;  // settings: udemy_api_base (default https://www.udemy.com)
 	std::string api_host_;
 	std::string proxy_;     // settings: http_proxy (optional)
