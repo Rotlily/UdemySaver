@@ -21,9 +21,11 @@ A built-in HTTP server powers a responsive web interface so you can browse your 
 | Boost (system, thread, beast) | Networking primitives     |
 | libcurl                | HTTP requests & downloads |
 | nlohmann\_json         | JSON parsing              |
+| FFmpeg                 | Video processing          |
 
 ## Build from source
 
+### Windows
 ```bash
 git clone https://github.com/jadis0x/UdemySaver.git
 cd UdemySaver
@@ -31,24 +33,47 @@ cmake -S . -B build
 cmake --build build
 ```
 
+### macOS
+On macOS, use Homebrew to install dependencies:
+
+```bash
+# Install dependencies
+brew install curl boost nlohmann-json ffmpeg cmake
+
+# Clone and build
+git clone https://github.com/jadis0x/UdemySaver.git
+cd UdemySaver
+cmake -S . -B build
+cmake --build build
+```
+
+The executable will be at `build/UdemySaver/UdemySaver`
+
 ## Configuration
 Create a settings.ini alongside the executable:
-```bash
+```ini
 # UdemySaver settings
-# http_proxy=http://127.0.0.1:8080   ; optional
 udemy_access_token=PASTE_YOUR_TOKEN_HERE
+udemy_client_id=PASTE_YOUR_CLIENT_ID_HERE
 udemy_api_base=https://www.udemy.com
+http_proxy=http://127.0.0.1:8888
 download_subtitles=true
-download_assets=true   
+download_assets=true
 ```
 You can also start the program without a token and paste it via the web interface; the file will be created automatically.
 
-## Obtaining the access token
+**Note:** Due to Cloudflare protection on Udemy's API, you need to use a proxy like mitmproxy to bypass bot detection. See the "Cloudflare Bypass" section below.
+
+## Obtaining the access token and client_id
 
 1. Log in to Udemy in your browser.
 2. Open the developer tools (F12) and head to the Application/Storage tab.
-3. Under **Cookies** for `www.udemy.com`, copy the value of `access_token`.
-4. Use this value in `settings.ini` or paste it into the web UI when prompted.
+3. Under **Cookies** for `www.udemy.com`:
+   - Copy the **entire** value of `access_token` (including the colon `:` in the middle)
+   - Copy the value of `client_id`
+4. Use these values in `settings.ini` or paste the access token into the web UI when prompted.
+
+**Important:** The `access_token` cookie has TWO parts separated by a colon (format: `public_key:private_key`). You must copy the complete value including both parts.
 
 ## Usage
 
@@ -66,6 +91,76 @@ You can also start the program without a token and paste it via the web interfac
 ## Demo Video
 [![UdemySaver Demo](https://img.youtube.com/vi/z6ltMWevtK4/0.jpg)](https://youtu.be/z6ltMWevtK4)
 
+## Cloudflare Bypass
+
+Udemy uses Cloudflare protection to block automated API requests. To bypass this, you need to route UdemySaver through a local proxy like **mitmproxy**.
+
+### Setup with mitmproxy
+
+1. **Install mitmproxy:**
+   ```bash
+   # macOS
+   brew install mitmproxy
+
+   # Linux
+   pip install mitmproxy
+
+   # Windows
+   # Download from https://mitmproxy.org
+   ```
+
+2. **Start mitmproxy:**
+   ```bash
+   mitmproxy --listen-port 8888
+   ```
+   Keep this running in a separate terminal.
+
+3. **Configure settings.ini:**
+   Add the proxy setting to your `settings.ini`:
+   ```ini
+   http_proxy=http://127.0.0.1:8888
+   ```
+
+4. **Run UdemySaver:**
+   ```bash
+   cd build/UdemySaver
+   ./UdemySaver
+   ```
+
+5. **Access the web interface:**
+   Open http://127.0.0.1:8080 in your browser.
+
+The proxy will intercept and forward all requests, bypassing Cloudflare's bot detection. SSL certificate verification is automatically disabled when using a proxy.
+
+### Why is this needed?
+
+Udemy's Cloudflare protection uses:
+- TLS fingerprinting to detect non-browser clients
+- HTTP/2 fingerprinting
+- Browser-specific headers (sec-ch-ua)
+
+Routing through mitmproxy makes requests appear as if they're coming from a legitimate browser, allowing downloads to work.
+
+## macOS-Specific Notes
+
+This fork includes several enhancements for macOS compatibility:
+
+### Changes Made
+- **Platform-aware CMake configuration** - Automatically detects macOS and uses Homebrew dependencies
+- **Custom FFmpeg finder module** - Locates FFmpeg libraries via pkg-config on macOS
+- **Fixed Windows-only code** - Wrapped Windows-specific headers and macros in `#ifdef _WIN32`
+- **Boost compatibility** - Updated to work with Homebrew's Boost 1.90+ (header-only mode)
+- **Proxy SSL bypass** - Automatically disables SSL verification when using a proxy (required for mitmproxy)
+- **Client ID support** - Added `udemy_client_id` configuration option
+- **Browser fingerprinting headers** - Includes sec-ch-ua headers to help bypass Cloudflare
+
+### Build Artifacts
+After building, the executable is located at:
+```
+build/UdemySaver/UdemySaver
+```
+
+Run it from this directory to ensure `settings.ini` and the `www/` folder are properly located.
 
 ## Legal
 This tool is intended for downloading courses you have legally purchased.
